@@ -22,13 +22,13 @@ case class EventLogTable(name: String,
     options: CaseInsensitiveStringMap) extends Table with SupportsRead with SupportsPartitionManagement with Logging {
 
   // e.g., a INT, b STRING.
-  private val customSchema = options.get(EventLogConfig.EVENT_LOG_SCHEMA_KEY) match {
+  private lazy val customSchema = options.get(EventLogConfig.EVENT_LOG_SCHEMA_KEY) match {
     case schema: String if StringUtils.isNoneBlank(schema) =>
       Some(StructType.fromDDL(schema))
     case _ => None
   }
 
-  private val inferSchema: Option[StructType] = {
+  private lazy val inferSchema: Option[StructType] = {
     val eventLogDir = options.get(EventLogConfig.EVENT_LOG_DIR_KEY)
     val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
     val hadoopConf = sparkSession.sessionState.newHadoopConfWithOptions(caseSensitiveMap)

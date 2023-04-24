@@ -76,7 +76,9 @@ select * from eventlog.spark_event_log where dt = '2022-10-26'
 
 1. 失败信息查询
 
-    ```sql
+    ```
+    set  spark.sql.catalog.eventlog.schema=`Event` String,`Job ID` String,`Completion Time` String,`Job Result` Struct<`Result`: String, `Exception`: Struct<`Message`: String, `Stack Trace`: String>>;
+
     select app_id, substring_index(`Job Result`.`Exception`.`Message`, '\n', 1) from eventlog.spark_event_log where dt = '2022-11-03' and `Job Result`.`Result` = 'JobFailed' limit 10;
     ```
 

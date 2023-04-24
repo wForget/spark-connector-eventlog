@@ -1,7 +1,6 @@
 package cn.wangz.spark.connector.eventlog
 
 import java.util
-
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog, TableChange}
 import org.apache.spark.sql.connector.expressions.Transform
@@ -9,6 +8,8 @@ import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import cn.wangz.spark.connector.eventlog.EventLogConfig._
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException
+
+import java.util.regex.Pattern
 
 class EventLogCatalog extends TableCatalog {
 
@@ -30,7 +31,8 @@ class EventLogCatalog extends TableCatalog {
 
   override def loadTable(ident: Identifier): Table = {
     if (eventLogTableName.equalsIgnoreCase(ident.name())) {
-      EventLogTable(eventLogTableName, SparkSession.getActiveSession.get, _options)
+      val spark = SparkSession.getActiveSession.get
+      EventLogTable(eventLogTableName, spark, runtimeCatalogOptions(spark))
     } else {
       throw new NoSuchTableException(ident)
     }
@@ -50,6 +52,18 @@ class EventLogCatalog extends TableCatalog {
 
   override def renameTable(oldIdent: Identifier, newIdent: Identifier): Unit = {
     throw new UnsupportedOperationException
+  }
+
+  private def runtimeCatalogOptions(spark: SparkSession): CaseInsensitiveStringMap = {
+    val prefix = Pattern.compile("^spark\\.sql\\.catalog\\." + name + "\\.(.+)")
+    val options = new util.HashMap[String, String]
+    options.putAll(_options)
+    spark.conf.getAll.foreach {
+      case (key, value) =>
+        val matcher = prefix.matcher(key)
+        if (matcher.matches && matcher.groupCount > 0) options.put(matcher.group(1), value)
+    }
+    new CaseInsensitiveStringMap(options)
   }
 
 }
