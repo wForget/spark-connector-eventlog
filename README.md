@@ -49,14 +49,7 @@ spark.sql.catalog.eventlog.tableName=spark_event_log_new
 
 > Schema：
 
-默认为：
-
-| 字段名 | 类型 |
-| --- | --- |
-| \`Event\` | string |
-| \`Job ID\` | string |
-| \`Completion Time\` | string |
-| \`Job Result\` | Struct<\`Result\` String, \`Exception\` Struct<\`Message\` String, \`Stack Trace\` String>> |
+默认：自动读取最新的 10 个 Event Log 文件进行推断。
 
 可通过 `schema` 属性配置，如：
 ```

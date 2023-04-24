@@ -1,18 +1,19 @@
 package cn.wangz.spark.connector.eventlog
 
 import cn.wangz.spark.connector.eventlog.EventLogPartitioner._
-import java.util.{Date, TimeZone}
 
+import java.util.{Date, TimeZone}
 import org.apache.commons.lang3.time.DateFormatUtils
 
 import scala.collection.JavaConverters._
 import org.apache.hadoop.fs.{FileStatus, Path}
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import scala.collection.mutable.ListBuffer
 
-class EventLogPartitioner(sparkSession: SparkSession, options: CaseInsensitiveStringMap) {
+class EventLogPartitioner(sparkSession: SparkSession, options: CaseInsensitiveStringMap) extends Logging {
 
   val eventLogDir = options.get(EventLogConfig.EVENT_LOG_DIR_KEY)
 
@@ -22,6 +23,7 @@ class EventLogPartitioner(sparkSession: SparkSession, options: CaseInsensitiveSt
     val hadoopConf = sparkSession.sessionState.newHadoopConfWithOptions(caseSensitiveMap)
     val fs = path.getFileSystem(hadoopConf)
     val files = fs.listStatus(path)
+      .filter(_.getLen <= 1024 * 1024 * 1024) // TODO file size less than 1GB
     files.flatMap(getPartitionFromFileStatus)
   }
 

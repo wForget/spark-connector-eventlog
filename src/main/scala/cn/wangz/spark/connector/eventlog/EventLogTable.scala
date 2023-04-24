@@ -1,21 +1,25 @@
 package cn.wangz.spark.connector.eventlog
 
-import java.util
-
 import org.apache.commons.lang3.StringUtils
+import org.apache.hadoop.fs.Path
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
-
-import scala.collection.JavaConverters._
+import org.apache.spark.sql.catalyst.util.CaseInsensitiveMap
 import org.apache.spark.sql.connector.catalog.{SupportsPartitionManagement, SupportsRead, Table, TableCapability}
+import org.apache.spark.sql.connector.eventlog.EventLogJSONOptionsInRead
 import org.apache.spark.sql.connector.read.ScanBuilder
+import org.apache.spark.sql.execution.datasources.json.TextInputJsonDataSource
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.unsafe.types.UTF8String
 
+import java.util
+import scala.collection.JavaConverters._
+
 case class EventLogTable(name: String,
     sparkSession: SparkSession,
-    options: CaseInsensitiveStringMap) extends Table with SupportsRead with SupportsPartitionManagement{
+    options: CaseInsensitiveStringMap) extends Table with SupportsRead with SupportsPartitionManagement with Logging {
 
   // e.g., a INT, b STRING.
   private val customSchema = options.get(EventLogConfig.EVENT_LOG_SCHEMA_KEY) match {
@@ -24,25 +28,45 @@ case class EventLogTable(name: String,
     case _ => None
   }
 
-  private val defaultSchema = StructType(
-    StructField("Event", StringType, true) ::
-      StructField("Job ID", StringType, true) ::
-      StructField("Completion Time", StringType, true) ::
-      // `Job Result` Struct<`Result` String, `Exception` Struct<`Message` String, `Stack Trace` String>>
-      StructField("Job Result", StructType(
-        StructField("Result", StringType, true) ::
-          StructField("Exception",
-            StructType(
-              StructField("Message", StringType, true) ::
-                StructField("Stack Trace", StringType, true) :: Nil)
-            , true
-          ) :: Nil)
-        , true
-      ) ::
-      Nil
-  )
+  private val inferSchema: Option[StructType] = {
+    val eventLogDir = options.get(EventLogConfig.EVENT_LOG_DIR_KEY)
+    val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
+    val hadoopConf = sparkSession.sessionState.newHadoopConfWithOptions(caseSensitiveMap)
+    val path = new Path(eventLogDir)
+    val fs = path.getFileSystem(hadoopConf)
+    val files = fs.listStatus(path)
+      .filter(!_.getPath.getName.endsWith(".inprogress"))
+      .filter(_.getLen <= 512 * 1024 * 1024)
+      .sortBy(-_.getAccessTime)
+      .take(10) // TODO just infer 10 files
+    val parsedOptions = new EventLogJSONOptionsInRead(
+      CaseInsensitiveMap(options.asScala.toMap),
+      sparkSession.sessionState.conf.sessionLocalTimeZone,
+      sparkSession.sessionState.conf.columnNameOfCorruptRecord)
+    TextInputJsonDataSource.inferSchema(sparkSession, files, parsedOptions)
+  }
 
-  lazy val dataSchema: StructType = customSchema.getOrElse(defaultSchema)
+//  private val defaultSchema = StructType(
+//    StructField("Event", StringType, true) ::
+//      StructField("Job ID", StringType, true) ::
+//      StructField("Completion Time", StringType, true) ::
+//      // `Job Result` Struct<`Result` String, `Exception` Struct<`Message` String, `Stack Trace` String>>
+//      StructField("Job Result", StructType(
+//        StructField("Result", StringType, true) ::
+//          StructField("Exception",
+//            StructType(
+//              StructField("Message", StringType, true) ::
+//                StructField("Stack Trace", StringType, true) :: Nil)
+//            , true
+//          ) :: Nil)
+//        , true
+//      ) ::
+//      Nil
+//  )
+
+  lazy val dataSchema: StructType = customSchema.orElse(inferSchema).getOrElse {
+    throw new RuntimeException("Unable to infer schema for json. It must be specified manually.")
+  }
 
   lazy val partitionSchema: StructType = StructType(
     StructField("dt", StringType, true) ::
