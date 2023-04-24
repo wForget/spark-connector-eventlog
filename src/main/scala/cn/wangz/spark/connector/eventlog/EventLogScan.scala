@@ -1,14 +1,13 @@
 package cn.wangz.spark.connector.eventlog
 
-import java.util.Locale
-
+import java.util.{Locale, OptionalLong}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, BoundReference, Cast, ExprUtils, Expression, Literal, Predicate}
 import org.apache.spark.sql.catalyst.util.{CaseInsensitiveMap, DateTimeUtils}
 import org.apache.spark.sql.catalyst.{InternalRow, expressions}
 import org.apache.spark.sql.connector.eventlog.EventLogJSONOptionsInRead
-import org.apache.spark.sql.connector.read.PartitionReaderFactory
+import org.apache.spark.sql.connector.read.{PartitionReaderFactory, Statistics}
 import org.apache.spark.sql.execution.PartitionedFileUtil
 import org.apache.spark.sql.execution.datasources.json.JsonDataSource
 import org.apache.spark.sql.execution.datasources.v2.json.{JsonPartitionReaderFactory, JsonScan}
@@ -36,47 +35,50 @@ case class EventLogScan(
 
   val eventLogPartitioner: EventLogPartitioner = EventLogPartitioner(sparkSession, options)
 
-  override protected def partitions: Seq[FilePartition] = {
-    val boundPredicate = if (partitionFilters.nonEmpty) {
+  private lazy val allFiles = {
+    if (partitionFilters.nonEmpty) {
       val predicate = partitionFilters.reduce(expressions.And)
-      Some(Predicate.createInterpreted(predicate.transform {
+      val boundPredicate = Predicate.createInterpreted(predicate.transform {
         case a: AttributeReference =>
           val index = readPartitionSchema.indexWhere(a.name == _.name)
           BoundReference(index, readPartitionSchema(index).dataType, nullable = true)
-      }))
-    } else {
-      None
-    }
-
-    val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
-    val defaultMaxSplitBytes = sparkSession.sessionState.conf.filesMaxPartitionBytes
-    val timeZoneId = caseSensitiveMap.getOrElse(
-      DateTimeUtils.TIMEZONE_OPTION, sparkSession.sessionState.conf.sessionLocalTimeZone)
-
-    val splitFiles = eventLogPartitioner.getPartitions().flatMap { filePartition =>
-      val partitionRow = InternalRow.fromSeq(readPartitionSchema.map { field =>
-        val partValue = field.name match {
-          case "dt" => filePartition.date
-          case "hour" => filePartition.hour
-          case "app_id" => filePartition.appId
-        }
-        Cast(Literal(partValue), field.dataType, Option(timeZoneId)).eval()
       })
-      if (boundPredicate.isEmpty || boundPredicate.get.eval(partitionRow)) {
-        PartitionedFileUtil.splitFiles(
-          sparkSession = sparkSession,
-          file = filePartition.file,
-          filePath = filePartition.file.getPath,
-          isSplitable = isSplitable(filePartition.file.getPath),
-          maxSplitBytes = defaultMaxSplitBytes,
-          partitionValues = partitionRow
-        )
-      } else {
-        None
+      eventLogPartitioner.getPartitions().filter { filePartition =>
+        val partitionRow = partitionValues(filePartition)
+        boundPredicate.eval(partitionRow)
       }
+    } else {
+      eventLogPartitioner.getPartitions()
     }
+  }
 
+  override protected def partitions: Seq[FilePartition] = {
+    val defaultMaxSplitBytes = sparkSession.sessionState.conf.filesMaxPartitionBytes
+    val splitFiles = allFiles.flatMap { filePartition =>
+      PartitionedFileUtil.splitFiles(
+        sparkSession = sparkSession,
+        file = filePartition.file,
+        filePath = filePartition.file.getPath,
+        isSplitable = isSplitable(filePartition.file.getPath),
+        maxSplitBytes = defaultMaxSplitBytes,
+        partitionValues = partitionValues(filePartition)
+      )
+    }
     FilePartition.getFilePartitions(sparkSession, splitFiles, defaultMaxSplitBytes)
+  }
+
+  private val timeZoneId = options.asCaseSensitiveMap.asScala.toMap.getOrElse(
+    DateTimeUtils.TIMEZONE_OPTION, sparkSession.sessionState.conf.sessionLocalTimeZone)
+
+  private def partitionValues(filePartition: EventLogPartition): InternalRow = {
+    InternalRow.fromSeq(readPartitionSchema.map { field =>
+      val partValue = field.name match {
+        case "dt" => filePartition.date
+        case "hour" => filePartition.hour
+        case "app_id" => filePartition.appId
+      }
+      Cast(Literal(partValue), field.dataType, Option(timeZoneId)).eval()
+    })
   }
 
   // ---- copy from org.apache.spark.sql.execution.datasources.v2.json.JsonScan ---
@@ -140,6 +142,19 @@ case class EventLogScan(
 
   override def description(): String = {
     super.description() + ", PushedFilters: " + pushedFilters.mkString("[", ", ", "]")
+  }
+
+  override def estimateStatistics(): Statistics = {
+    new Statistics {
+      override def sizeInBytes(): OptionalLong = {
+        val compressionFactor = sparkSession.sessionState.conf.fileCompressionFactor
+        val fileSizeInBytes = allFiles.map(_.file.getLen).sum
+        val size = (compressionFactor * fileSizeInBytes).toLong
+        OptionalLong.of(size)
+      }
+
+      override def numRows(): OptionalLong = OptionalLong.empty()
+    }
   }
 
   override def fileIndex: PartitioningAwareFileIndex = null
