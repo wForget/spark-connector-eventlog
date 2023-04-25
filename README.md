@@ -89,3 +89,11 @@ select * from eventlog.spark_event_log where dt = '2022-10-26'
 
     select * from (select app_id, `Stage ID`, percentile(`Task Metrics`.`Executor Run Time`, 0.75) AS P75, max(`Task Metrics`.`Executor Run Time`) as MAX from eventlog.spark_event_log where dt = '2022-11-08' and hour=10 and `Event` = 'SparkListenerTaskEnd' and `Task Metrics`.`Executor Run Time` is not null group by app_id, `Stage ID`) t order by MAX desc limit 100;
     ```
+
+3. Task 序列化时间过长
+
+    ```
+    select app_id, `Stage ID`, `Stage Attempt ID`, `Task Info`.`Task ID`, `Task Metrics`.`Executor Deserialize Time`
+    from eventlog.spark_event_log where dt = '2023-04-24' and Event = 'SparkListenerTaskEnd'
+    order by `Task Metrics`.`Executor Deserialize Time` desc limit 50;
+   ```
