@@ -1,6 +1,6 @@
 ## Spark SQL 读取 EventLog
 
-### 背景
+### 一、背景
 
 此项目用于 Spark SQL 读取分析 Spark Event Log。
 
@@ -10,7 +10,7 @@ Spark Event Log 是以 JSON 文件保存的，所以我们可以直接通过 Spa
 
 所以此项目主要通过实现一个 EventLogCatalog，为一个 application 文件添加 dt、hour、app_id 的分区，方便根据分区过滤并进行 SQL 处理。
 
-### 使用
+### 二、打包配置
 
 #### 打包并添加到 Spark 依赖
 
@@ -18,7 +18,11 @@ Spark Event Log 是以 JSON 文件保存的，所以我们可以直接通过 Spa
 mvn clean package -DskipTests
 ```
 
-将打完的包，复制到 $SPARK_HOME/jars 中。
+将打完的包，复制到 $SPARK_HOME/jars 中，或通过 add jar 引入：
+
+```
+add jar hdfs://XXX/spark-connector-eventlog-X.X-SNAPSHOT.jar;
+```
 
 #### 配置 Catalog
 
@@ -27,9 +31,9 @@ spark.sql.catalog.eventlog=cn.wangz.spark.connector.eventlog.EventLogCatalog
 spark.sql.catalog.eventlog.eventLogDir=hdfs://namenode01/tmp/spark/logs
 ```
 
-### 分析 EventLog
+### 三、使用分析 EventLog
 
-> 表名
+#### 表名
 
 默认为：`spark_event_log`
 
@@ -39,7 +43,7 @@ spark.sql.catalog.eventlog.eventLogDir=hdfs://namenode01/tmp/spark/logs
 spark.sql.catalog.eventlog.tableName=spark_event_log_new
 ```
 
-> 分区：
+#### 分区
 
 | 字段名 | 类型 |
 | --- | --- |
@@ -47,7 +51,7 @@ spark.sql.catalog.eventlog.tableName=spark_event_log_new
 | hour | string |
 | app_id | string |
 
-> Schema：
+#### Schema
 
 默认：自动读取最新的 10 个 Event Log 文件进行推断。
 
@@ -56,7 +60,7 @@ spark.sql.catalog.eventlog.tableName=spark_event_log_new
 spark.sql.catalog.eventlog.schema="Event String, `Job Result` Struct<Result: String, Exception: String>"
 ```
 
-> 读取 EventLog
+#### 读取 EventLog
 
 ```
 // 可通过设置 maxPartitionBytes，控制每个 task 处理的数据量
@@ -72,7 +76,23 @@ show partitions eventlog.spark_event_log
 select * from eventlog.spark_event_log where dt = '2022-10-26'
 ```
 
-### 使用案例
+### 四、扩展 UDF
+
+#### SparkPlanNodesUDF
+
+获取 sparkPlanInfo 所有节点。
+
+Spark Event (SparkListenerSQLAdaptiveExecutionUpdate/SparkListenerSQLExecutionStart) 中 SparkPlanInfo 是通过嵌套的树型对象存储，很难通过 SQL Struct 类型表示，所以默认将 sparkPlanInfo 字段默认设置为 String 类型，展示原始 json 字符串。
+
+提供一个 `SparkPlanNodesUDF` UDF 来处理 sparkPlanInfo json 字符串，获取所有 plan 节点。
+
+使用：
+
+```
+CREATE TEMPORARY FUNCTION spark_plan_nodes AS 'cn.wangz.spark.connector.eventlog.udf.SparkPlanNodesUDF';
+```
+
+### 五、使用案例
 
 1. 失败信息查询
 

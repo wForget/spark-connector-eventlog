@@ -28,6 +28,9 @@ case class EventLogTable(name: String,
     case _ => None
   }
 
+  // use json string filed
+  private val unParseFields = Array("sparkPlanInfo")
+
   private lazy val inferSchema: Option[StructType] = {
     val eventLogDir = options.get(EventLogConfig.EVENT_LOG_DIR_KEY)
     val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
@@ -43,7 +46,9 @@ case class EventLogTable(name: String,
       CaseInsensitiveMap(options.asScala.toMap),
       sparkSession.sessionState.conf.sessionLocalTimeZone,
       sparkSession.sessionState.conf.columnNameOfCorruptRecord)
-    TextInputJsonDataSource.inferSchema(sparkSession, files, parsedOptions)
+      TextInputJsonDataSource.inferSchema(sparkSession, files, parsedOptions).map { schema =>
+        StructType(schema.fields.filter(f => !unParseFields.contains(f.name)) ++ unParseFields.map(StructField(_, StringType)))
+    }
   }
 
 //  private val defaultSchema = StructType(
