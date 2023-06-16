@@ -96,7 +96,7 @@ CREATE TEMPORARY FUNCTION spark_plan_nodes AS 'cn.wangz.spark.connector.eventlog
 
 1. 失败信息查询
 
-    ```
+    ```sql
     set  spark.sql.catalog.eventlog.schema=`Event` String,`Job ID` String,`Completion Time` String,`Job Result` Struct<`Result`: String, `Exception`: Struct<`Message`: String, `Stack Trace`: String>>;
 
     select app_id, substring_index(`Job Result`.`Exception`.`Message`, '\n', 1) from eventlog.spark_event_log where dt = '2022-11-03' and `Job Result`.`Result` = 'JobFailed' limit 10;
@@ -104,7 +104,7 @@ CREATE TEMPORARY FUNCTION spark_plan_nodes AS 'cn.wangz.spark.connector.eventlog
 
 2. 倾斜任务查询
 
-    ```
+    ```sql
     set spark.sql.catalog.eventlog.schema=`Event` String,`Stage ID` Int,`Stage Attempt ID` Int,`Task Type` String,`Task End Reason` String,`Task Info` String,`Task Executor Metrics` String,`Task Metrics` Struct<`Executor Run Time`: Long>;
 
     select * from (select app_id, `Stage ID`, percentile(`Task Metrics`.`Executor Run Time`, 0.75) AS P75, max(`Task Metrics`.`Executor Run Time`) as MAX from eventlog.spark_event_log where dt = '2022-11-08' and hour=10 and `Event` = 'SparkListenerTaskEnd' and `Task Metrics`.`Executor Run Time` is not null group by app_id, `Stage ID`) t order by MAX desc limit 100;
@@ -112,8 +112,34 @@ CREATE TEMPORARY FUNCTION spark_plan_nodes AS 'cn.wangz.spark.connector.eventlog
 
 3. Task 序列化时间过长
 
-    ```
+    ```sql
     select app_id, `Stage ID`, `Stage Attempt ID`, `Task Info`.`Task ID`, `Task Metrics`.`Executor Deserialize Time`
     from eventlog.spark_event_log where dt = '2023-04-24' and Event = 'SparkListenerTaskEnd'
     order by `Task Metrics`.`Executor Deserialize Time` desc limit 50;
-   ```
+    ```
+
+4. 查询 Kyuubi 任务
+
+    ```sql
+    select distinct app_id from eventlog.spark_event_log where dt = '2023-06-13' and `Event` = 'SparkListenerEnvironmentUpdate' and `Spark Properties`['spark.yarn.tags'] = 'KYUUBI' limit 10;
+    ```
+   
+5. Kyuubi 倾斜任务
+
+    ```sql
+    with kyuubi_apps as (select distinct app_id
+      from eventlog.spark_event_log
+      where dt = '2023-06-13'
+      and `Event` = 'SparkListenerEnvironmentUpdate'
+      and `Spark Properties`['spark.yarn.tags'] = 'KYUUBI'),
+    skew_apps as (select app_id,
+      `Stage ID`,
+      percentile(`Task Metrics`.`Executor Run Time`, 0.75) AS P75,
+      max(`Task Metrics`.`Executor Run Time`)              as MAX
+      from eventlog.spark_event_log
+      where dt = '2023-06-13'
+      and `Event` = 'SparkListenerTaskEnd'
+      and `Task Metrics`.`Executor Run Time` is not null
+      group by app_id, `Stage ID`)
+    select * from kyuubi_apps t1 join skew_apps t2 on t1.app_id = t2.app_id order by MAX desc limit 100;
+    ```
