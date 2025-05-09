@@ -46,7 +46,7 @@ class EventLogPartitioner(sparkSession: SparkSession, options: CaseInsensitiveSt
 object EventLogPartitioner {
   def apply(sparkSession: SparkSession, options: CaseInsensitiveStringMap): EventLogPartitioner = new EventLogPartitioner(sparkSession, options)
 
-  private val appIdPattern = "^(application_\\d+_\\d+)_\\d+$".r
+  private val appIdPattern = "^(application_\\d+_\\d+)(_\\d+)?$".r
 }
 
 

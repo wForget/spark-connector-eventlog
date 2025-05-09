@@ -1,6 +1,5 @@
 package cn.wangz.spark.connector.eventlog
 
-import java.util.{Locale, OptionalLong}
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, BoundReference, Cast, ExprUtils, Expression, Literal, Predicate}
@@ -10,14 +9,15 @@ import org.apache.spark.sql.connector.eventlog.EventLogJSONOptionsInRead
 import org.apache.spark.sql.connector.read.{PartitionReaderFactory, Statistics}
 import org.apache.spark.sql.execution.PartitionedFileUtil
 import org.apache.spark.sql.execution.datasources.json.JsonDataSource
+import org.apache.spark.sql.execution.datasources.v2.TextBasedFileScan
 import org.apache.spark.sql.execution.datasources.v2.json.{JsonPartitionReaderFactory, JsonScan}
-import org.apache.spark.sql.execution.datasources.v2.{FileScan, TextBasedFileScan}
-import org.apache.spark.sql.execution.datasources.{FilePartition, PartitioningAwareFileIndex}
+import org.apache.spark.sql.execution.datasources.{FilePartition, FileStatusWithMetadata, PartitioningAwareFileIndex}
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.util.SerializableConfiguration
 
+import java.util.{Locale, OptionalLong}
 import scala.collection.JavaConverters._
 
 case class EventLogScan(
@@ -57,7 +57,7 @@ case class EventLogScan(
     val splitFiles = allFiles.flatMap { filePartition =>
       PartitionedFileUtil.splitFiles(
         sparkSession = sparkSession,
-        file = filePartition.file,
+        file = FileStatusWithMetadata(filePartition.file),
         filePath = filePartition.file.getPath,
         isSplitable = isSplitable(filePartition.file.getPath),
         maxSplitBytes = defaultMaxSplitBytes,
@@ -128,9 +128,6 @@ case class EventLogScan(
     JsonPartitionReaderFactory(sparkSession.sessionState.conf, broadcastedConf,
       dataSchema, readDataSchema, readPartitionSchema, parsedOptions, pushedFilters)
   }
-
-  override def withFilters(partitionFilters: Seq[Expression], dataFilters: Seq[Expression]): FileScan =
-    this.copy(partitionFilters = partitionFilters, dataFilters = dataFilters)
 
   override def equals(obj: Any): Boolean = obj match {
     case j: JsonScan => super.equals(j) && dataSchema == j.dataSchema && options == j.options &&

@@ -9,9 +9,9 @@
     <version>1.0-SNAPSHOT</version>
 
     <properties>
-        <scala.version>2.12.10</scala.version>
+        <scala.version>2.12.18</scala.version>
         <scala.binary.version>2.12</scala.binary.version>
-        <spark.version>3.1.3</spark.version>
+        <spark.version>3.5.5</spark.version>
 
         <maven.plugin.compiler.version>3.8.1</maven.plugin.compiler.version>
         <maven.plugin.scala.version>4.6.1</maven.plugin.scala.version>
@@ -72,6 +72,8 @@
                     <compilerArgs>
                         <arg>-Xlint:all,-serial,-path</arg>
                     </compilerArgs>
+                    <source>8</source>
+                    <target>8</target>
                 </configuration>
             </plugin>
 
